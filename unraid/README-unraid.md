@@ -196,6 +196,7 @@ UUIDs.
 | `tms doctor` warns about the arch list | The PyTorch build has no kernels for your card. Open an issue — the image needs a newer torch. |
 | `CUDA error: no kernel image is available` | Same as above, hit at runtime because `tms doctor` was skipped. |
 | DataLoader workers die, bus errors | `--shm-size=8g` missing from Extra Parameters. |
+| `DataLoader worker (pid N) is killed by signal` hours into a run | The `--memory` cap in Extra Parameters. The 8g of shm counts toward it, and a raised `PIPER_BATCH_SIZE` costs host RAM too. Raise the cap. |
 | Console says the dojo isn't seeded | The appdata path isn't mapped, or isn't writable. |
 | Voices are root-owned | `RUN_AS_ROOT=true` is set, or scripts were run directly as root instead of through `tms`. |
 | Training slows to a crawl part way in | The mover started relocating the dojo. Set the share to Cache: Only. |

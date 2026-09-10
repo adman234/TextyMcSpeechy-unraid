@@ -28,13 +28,15 @@
 
     STORAGE: the image is large (~15GB) and training needs room to work — budget 50GB free. Point the appdata path at an NVMe pool rather than the array, and set that share to Cache: Only so the mover cannot relocate an active training run.
 
+    MEMORY CAP: Extra Parameters sets --memory=16g so a runaway training run cannot starve the rest of your server. Note that the 8g of shared memory counts toward that limit, and raising PIPER_BATCH_SIZE raises host RAM use too. If a run dies with "DataLoader worker (pid N) is killed by signal", that is this cap, not a bug -- raise it to 24g or 32g.
+
     The port below is TensorBoard, for watching loss curves. It only answers while training is running.
   </Overview>
   <Category>Tools: Productivity: Other:</Category>
   <WebUI>http://[IP]:[PORT:6006]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy-unraid.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy.png</Icon>
-  <ExtraParams>--runtime=nvidia --shm-size=8g</ExtraParams>
+  <ExtraParams>--runtime=nvidia --shm-size=8g --memory=16g</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
@@ -86,10 +88,10 @@
 
   <Config Name="TZ"
           Target="TZ"
-          Default=""
+          Default="America/Chicago"
           Mode=""
           Description="Timezone, e.g. Europe/London. Only affects log and checkpoint timestamps."
-          Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+          Type="Variable" Display="advanced" Required="false" Mask="false">America/Chicago</Config>
 
   <Config Name="Run as root"
           Target="RUN_AS_ROOT"
