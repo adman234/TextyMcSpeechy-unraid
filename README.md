@@ -1,5 +1,27 @@
 # TextyMcSpeechy
 
+> ### This fork adds a one-click Unraid install
+>
+> Upstream TextyMcSpeechy runs as a GPU container driven by scripts on the host.
+> That works on a Debian workstation, but not on Unraid, whose root filesystem is
+> rebuilt in RAM at every boot and ships none of the tools those scripts need.
+>
+> This fork adds an **all-in-one image** — training stack, dojo scripts and
+> tooling in one container — published to GHCR and installable from a template
+> like any other Unraid app. No local build, no host packages.
+>
+> **[→ Unraid install guide](unraid/README-unraid.md)**
+>
+> ```
+> https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy-unraid.xml
+> ```
+>
+> Everything below is upstream's documentation and still applies — the workflow
+> is identical, you just reach it through `tms` inside the container instead of
+> running the scripts on the host. Upstream:
+> [bacca87/TextyMcSpeechy](https://github.com/bacca87/TextyMcSpeechy).
+
+
 ## Make any voice into a Piper text-to-speech model 
 - Make a custom Piper TTS model out of your own voice samples or any existing voice dataset
 - Learn how to convert a public domain dataset into another voice using an RVC model

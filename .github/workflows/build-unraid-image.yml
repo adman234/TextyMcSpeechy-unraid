@@ -1,0 +1,141 @@
+name: Build and publish Unraid image
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+    paths-ignore: ["**.md", "unraid/*.xml"]
+  pull_request:
+    branches: ["main"]
+  # The image pins piper1-gpl and torch, so it does not drift on its own -- but a
+  # monthly rebuild picks up base-image security updates without anyone clicking.
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/textymcspeechy-unraid
+
+jobs:
+  shim-tests:
+    # The shim stands between upstream's scripts and local execution; if it
+    # regresses, training breaks in ways that are painful to diagnose inside a
+    # 15GB image. It is pure bash, so test it before spending 40 minutes on a build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the docker shim
+        run: bash unraid/tests/test-docker-shim.sh
+      - name: Shellcheck the Unraid scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck -S warning unraid/docker-shim unraid/tms \
+                              unraid/entrypoint.sh unraid/run_container.sh
+
+  build:
+    needs: shim-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        # The finished image is ~15GB and the build needs roughly double that in
+        # layers and pip caches. A stock runner has nowhere near enough, and the
+        # failure mode is an opaque "no space left on device" deep in the torch
+        # install, so clear the preinstalled toolchains we do not use first.
+        run: |
+          set -x
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/share/powershell \
+                      /usr/local/lib/node_modules /opt/hostedtoolcache \
+                      "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          docker image prune -af || true
+          df -h /
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # Fork PRs have no push credentials; they build without publishing.
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.unraid
+          # Unraid is x86_64 only, and CUDA wheels are x86_64 anyway.
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # No gha cache: the layers run to tens of GB and blow the 10GB cache
+          # quota, evicting themselves and everything else for no benefit.
+          build-args: |
+            BUILD_DATE=${{ github.event.repository.updated_at }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Smoke test the published image
+        if: github.event_name != 'pull_request'
+        # No GPU on the runner, so this checks everything except CUDA execution:
+        # the tools are present, torch imports and knows about Blackwell, the
+        # shim behaves, and the entrypoint seeds an empty dojo.
+        run: |
+          set -euo pipefail
+          IMAGE="$(echo "${{ steps.meta.outputs.tags }}" | head -n1)"
+          echo "Testing $IMAGE"
+
+          docker run --rm --entrypoint bash "$IMAGE" -c \
+            'command -v tmux bc jq inotifywait ffmpeg sox tms docker gosu tini'
+
+          docker run --rm --entrypoint python3 "$IMAGE" -c \
+            'import torch; a=torch.cuda.get_arch_list(); print(torch.__version__, torch.version.cuda, a); assert "sm_120" in a, "no Blackwell kernels in this torch build"'
+
+          docker run --rm --entrypoint bash "$IMAGE" -c \
+            'docker stop textymcspeechy-piper && docker exec textymcspeechy-piper true'
+
+          # A fresh named volume stands in for an empty appdata share.
+          docker volume create tms-smoke >/dev/null
+          docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
+            bash -c 'test -x /app/tts_dojo/newdojo.sh && test -d /app/tts_dojo/DOJO_CONTENTS && echo "dojo seeded OK"'
+          # The checkpoint skeleton is empty dirs; .dockerignore has eaten it before.
+          docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
+            bash -c 'for d in M F; do for q in low medium high; do
+                       test -d "/app/tts_dojo/PRETRAINED_CHECKPOINTS/default/${d}_voice/$q" \
+                         || { echo "missing ${d}_voice/$q"; exit 1; }; done; done
+                     echo "checkpoint skeleton OK"'
+          # Deep scripts must be executable, not just the top-level ones.
+          docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
+            bash -c 'test -x /app/tts_dojo/DOJO_CONTENTS/scripts/utils/piper_training.sh && echo "deep scripts executable OK"'
+          # Second start must leave the user's data alone.
+          docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
+            bash -c 'touch /app/tts_dojo/.mine'
+          docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
+            bash -c 'test -f /app/tts_dojo/.mine && echo "existing dojo preserved OK"'
+          docker volume rm tms-smoke >/dev/null

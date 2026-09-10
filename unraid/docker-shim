@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# docker-shim -- installed on PATH as `docker` inside the all-in-one image.
+#
+# WHY THIS EXISTS
+# ---------------
+# TextyMcSpeechy is built as two halves: interactive driver scripts that run on
+# the host, and a GPU container they reach into with `docker exec
+# textymcspeechy-piper ...`. The Unraid image collapses both halves into one
+# container, so those calls have nowhere to go -- the "remote" container IS the
+# process making the call.
+#
+# Rather than patch ~10 call sites across the dojo scripts (which would conflict
+# with every upstream merge), this stands in for the docker CLI and turns
+# `docker exec textymcspeechy-piper CMD` into plain local execution of CMD.
+# Upstream's scripts stay byte-identical and keep working unmodified.
+#
+# Everything it does NOT understand is a deliberate no-op returning success: the
+# dojo scripts call `docker stop` when you quit the training console, and in an
+# all-in-one container honouring that would kill the very thing you are using.
+set -uo pipefail
+
+SELF_CONTAINER="${TMS_CONTAINER_NAME:-textymcspeechy-piper}"
+
+note() { printf '[docker-shim] %s\n' "$*" >&2; }
+
+# No arguments: behave like `docker` with none.
+[ "$#" -eq 0 ] && { note "no command given"; exit 0; }
+
+cmd="$1"; shift
+
+# `docker container <verb>` is a synonym for `docker <verb>`.
+if [ "$cmd" = "container" ] && [ "$#" -gt 0 ]; then
+    cmd="$1"; shift
+fi
+
+case "$cmd" in
+exec)
+    want_user=""
+    workdir=""
+    # Consume exec's own flags. Everything after the container name is the
+    # command, and must be passed through untouched -- `bash -c "..."` arrives
+    # as a single argv element and has to stay that way.
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -i|-t|-it|-ti|--interactive|--tty|-d|--detach|--privileged)
+                shift ;;
+            -u|--user)
+                want_user="${2:-}"; shift 2 ;;
+            -u=*|--user=*)
+                want_user="${1#*=}"; shift ;;
+            -w|--workdir)
+                workdir="${2:-}"; shift 2 ;;
+            -w=*|--workdir=*)
+                workdir="${1#*=}"; shift ;;
+            -e|--env)
+                export "${2:?}"; shift 2 ;;
+            -e=*|--env=*)
+                export "${1#*=}"; shift ;;
+            --)
+                shift; break ;;
+            -*)
+                # Unknown flag: skip it rather than mistake it for the container.
+                note "ignoring unsupported exec flag: $1"; shift ;;
+            *)
+                break ;;
+        esac
+    done
+
+    if [ "$#" -eq 0 ]; then
+        note "exec: no container or command given"
+        exit 1
+    fi
+
+    # First non-flag argument is the container name. Anything other than
+    # ourselves is a genuine cross-container call this image cannot service.
+    target="$1"; shift
+    if [ "$target" != "$SELF_CONTAINER" ]; then
+        note "cannot exec into '$target': this image has no Docker daemon."
+        exit 1
+    fi
+
+    if [ "$#" -eq 0 ]; then
+        note "exec: no command given"
+        exit 1
+    fi
+
+    # Never fall through to running the command somewhere unintended.
+    if [ -n "$workdir" ] && ! cd "$workdir"; then
+        note "exec: working directory '$workdir' does not exist"
+        exit 1
+    fi
+
+    # Upstream runs the espeak-ng rule compiler as root. We are whatever the
+    # entrypoint dropped to, and there is no daemon to ask for more, so say so
+    # in terms the user can act on instead of failing obscurely.
+    if [ -n "$want_user" ] && [ "$want_user" != "$(id -un)" ] && [ "$want_user" != "$(id -u)" ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+            note "'-u $want_user' requested but running as $(id -un); continuing as $(id -un)."
+            note "If this is the espeak-ng rule compiler, set RUN_AS_ROOT=true on the container."
+        fi
+    fi
+
+    exec "$@"
+    ;;
+
+stop|kill|rm|restart|start)
+    # The dojo stops "the container" when training ends. Here that is suicide.
+    note "ignoring '$cmd' -- this container hosts the dojo itself and stays up."
+    note "Stop it from the Unraid Docker tab if you really want it down."
+    exit 0
+    ;;
+
+ps)
+    # Shape matches `docker ps` closely enough for eyeballing; the dojo only
+    # ever greps `docker exec ... ps aux`, which the exec branch handles.
+    printf 'CONTAINER ID   IMAGE                    COMMAND       STATUS         NAMES\n'
+    printf '000000000000   textymcspeechy-unraid    "entrypoint"  Up (self)      %s\n' "$SELF_CONTAINER"
+    exit 0
+    ;;
+
+inspect)
+    # Answer the one question upstream's launchers ask: is it running?
+    for arg in "$@"; do
+        case "$arg" in
+            *State.Running*) printf 'true\n'; exit 0 ;;
+        esac
+    done
+    printf 'true\n'
+    exit 0
+    ;;
+
+info)
+    # prebuilt_container_run.sh greps this for "nvidia" before it will start.
+    printf '{"nvidia":{"path":"/usr/bin/nvidia-container-runtime"},"runc":{"path":"runc"}}\n'
+    exit 0
+    ;;
+
+pull|push|build|compose|image|login|logout|tag)
+    note "'$cmd' is not available inside the container (and is not needed)."
+    exit 0
+    ;;
+
+version)
+    printf 'docker-shim (TextyMcSpeechy all-in-one image) -- no Docker daemon\n'
+    exit 0
+    ;;
+
+*)
+    note "'$cmd' is not implemented by the shim; ignoring."
+    exit 0
+    ;;
+esac

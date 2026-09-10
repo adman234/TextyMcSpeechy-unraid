@@ -1,0 +1,103 @@
+# syntax=docker/dockerfile:1
+#
+# All-in-one TextyMcSpeechy image for Unraid.
+#
+# Upstream splits the project in two: a GPU container, and interactive driver
+# scripts that run on the host and reach into it with `docker exec`. That works
+# on a Debian workstation. It does not work on Unraid, whose root filesystem is
+# rebuilt in RAM at every boot and ships none of the tools the driver scripts
+# need (tmux, bc, jq, inotify-tools).
+#
+# This image puts both halves in one container: the piper1-gpl training stack,
+# the dojo scripts, and the CLI tools they need. A shim on PATH turns the
+# scripts' `docker exec textymcspeechy-piper ...` calls into local execution, so
+# upstream's scripts run unmodified and stay mergeable.
+#
+# Build:  docker build -f Dockerfile.unraid -t textymcspeechy-unraid .
+# Use:    see unraid/README-unraid.md
+
+FROM nvidia/cuda:12.6.2-runtime-ubuntu24.04
+
+ARG BUILD_DATE
+ARG VCS_REF
+
+LABEL org.opencontainers.image.title="TextyMcSpeechy for Unraid" \
+      org.opencontainers.image.description="Piper TTS voice training, self-contained for Unraid: GPU stack, dojo scripts and tooling in one container" \
+      org.opencontainers.image.source="https://github.com/adman234/TextyMcSpeechy-unraid" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    TERM=xterm-256color \
+    SHELL=/bin/bash
+
+WORKDIR /app
+
+# Build toolchain, the piper1-gpl runtime deps, AND the tools upstream expects
+# to find on the host: tmux drives the training console, bc does the disk-space
+# arithmetic, jq writes the voice config, inotify-tools spots new checkpoints,
+# ffmpeg/sox handle the dataset audio.
+#
+# piper1-gpl is pinned to the exact commit upstream's Dockerfile tests against.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3.12 python3.12-venv python3.12-dev \
+      git espeak-ng tmux ffmpeg inotify-tools \
+      build-essential cmake ninja-build \
+      bc jq sox wget curl ca-certificates \
+      less nano procps psmisc rsync unzip \
+      tini gosu tzdata \
+ && git init piper \
+ && cd piper \
+ && git fetch --depth 1 https://github.com/OHF-Voice/piper1-gpl.git ffb62233b04dd0b04f005cd7c1f879eb9b0889fd \
+ && git checkout FETCH_HEAD \
+ && rm -rf /var/lib/apt/lists/*
+
+# Virtual environment + training stack (torch first, then the [train] extras).
+# The torch wheel bundles its own CUDA runtime, which is what actually decides
+# GPU support -- CUDA 12.8+ is required for RTX 50-series (Blackwell, sm_120).
+WORKDIR /app/piper
+RUN python3.12 -m venv .venv && \
+    /app/piper/.venv/bin/pip install --upgrade pip wheel setuptools && \
+    /app/piper/.venv/bin/pip install torch==2.13.0 && \
+    /app/piper/.venv/bin/pip install -e ".[train]" onnxscript torchaudio scikit-build && \
+    CC=/usr/bin/gcc CXX=/usr/bin/g++ /app/piper/.venv/bin/python setup.py build_ext --inplace && \
+    bash /app/piper/build_monotonic_align.sh && \
+    /app/piper/.venv/bin/pip cache purge
+
+ENV PATH="/app/piper/.venv/bin:$PATH"
+ENV CUDA_VISIBLE_DEVICES=0
+
+# The project itself. /app/tts_dojo is a mount point at runtime, so the dojo
+# tree is also kept pristine under /opt/tms-seed and copied in on first start --
+# that is what makes the appdata share start populated instead of empty.
+WORKDIR /app
+COPY . /app/
+RUN mkdir -p /opt/tms-seed \
+ && cp -a /app/tts_dojo /opt/tms-seed/tts_dojo \
+ && find /opt/tms-seed /app -name '*.sh' -exec chmod +x {} + \
+ && rm -rf /app/tts_dojo \
+ && mkdir -p /app/tts_dojo
+
+# The shim stands in for the docker CLI; see unraid/docker-shim for why.
+COPY unraid/docker-shim /usr/local/bin/docker
+COPY unraid/tms /usr/local/bin/tms
+COPY unraid/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY unraid/profile-banner.sh /etc/profile.d/00-textymcspeechy.sh
+# Replaces upstream's compose launcher, which has nothing to launch here.
+COPY unraid/run_container.sh /app/run_container.sh
+
+RUN chmod +x /usr/local/bin/docker /usr/local/bin/tms \
+             /usr/local/bin/entrypoint.sh /app/run_container.sh \
+ && printf 'source /etc/profile.d/00-textymcspeechy.sh\n' >> /root/.bashrc
+
+WORKDIR /app/tts_dojo
+VOLUME ["/app/tts_dojo"]
+EXPOSE 6006
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Not a daemon: the container holds a ready GPU environment you attach to with
+# the Unraid console button and drive with `tms`.
+CMD ["sleep", "infinity"]

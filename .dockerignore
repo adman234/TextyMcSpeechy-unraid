@@ -1,0 +1,21 @@
+# The build only needs project source. Keeping the context small also stops a
+# stray dataset in a working copy (wavs, 800MB checkpoints) from being shipped
+# to the daemon or baked into the image.
+#
+# Note what is deliberately NOT excluded: the empty directory skeleton under
+# PRETRAINED_CHECKPOINTS/default (held open by .required_dir placeholders) is
+# load-bearing -- download_defaults.sh sorts checkpoints into it by voice type
+# and quality, and without those directories the download silently has nowhere
+# to go.
+.git
+.github
+
+# User data that only exists in a dirty working copy.
+tts_dojo/DATASETS/*/
+tts_dojo/*_dojo/
+**/*.ckpt
+**/*.onnx
+**/*.wav
+**/*.mp3
+**/*.flac
+**/__pycache__/

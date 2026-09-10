@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# tms -- the front door for the all-in-one image.
+#
+# Wraps the dojo scripts so the whole workflow is reachable without knowing
+# which directory each one has to be run from, and drops privileges when
+# invoked as root (Unraid's console button execs as the container user, but
+# `docker exec` without -u does not always).
+set -uo pipefail
+
+DOJO_DIR=/app/tts_dojo
+TMS_USER="${TMS_USER:-tms}"
+
+# Re-exec unprivileged so voices don't come out root-owned. RUN_AS_ROOT is the
+# documented escape hatch (the espeak-ng rule compiler genuinely needs root).
+case "${RUN_AS_ROOT:-false}" in
+    [Tt][Rr][Uu][Ee]|1|[Yy][Ee][Ss]) : ;;
+    *)
+        if [ "$(id -u)" -eq 0 ] && id -u "${TMS_USER}" >/dev/null 2>&1; then
+            exec env HOME="/home/${TMS_USER}" USER="${TMS_USER}" \
+                gosu "${TMS_USER}" "$0" "$@"
+        fi
+        ;;
+esac
+
+usage() {
+cat <<'USAGE'
+tms -- TextyMcSpeechy on Unraid
+
+  tms doctor              Check the GPU, driver and PyTorch build. Run this first.
+  tms dataset <name>      Prepare tts_dojo/DATASETS/<name> for training.
+  tms checkpoints <lang>  Download pretrained checkpoints, e.g. en-us. Once, ~5GB.
+  tms new <voice>         Create a <voice>_dojo to train in.
+  tms train <voice>       Start (or resume) training <voice>_dojo.
+  tms attach              Reattach to a training session you detached from.
+  tms shell               A shell in the dojo, for anything not covered above.
+
+Typical first run:
+
+  tms doctor
+  tms checkpoints en-us
+  # copy your wavs + metadata.csv into tts_dojo/DATASETS/myvoice/ first
+  tms dataset myvoice
+  tms new myvoice
+  tms train myvoice
+
+Detach from training with Ctrl-b then d; it keeps running. Finished voices
+appear in tts_dojo/<voice>_dojo/tts_voices/.
+USAGE
+}
+
+die() { printf 'tms: %s\n' "$*" >&2; exit 1; }
+
+need_dojo() {
+    [ -d "$DOJO_DIR" ] || die "$DOJO_DIR is missing. Is the appdata path mapped?"
+}
+
+cmd="${1:-help}"
+[ "$#" -gt 0 ] && shift
+
+case "$cmd" in
+doctor)
+    echo "== GPU =="
+    if nvidia-smi -L 2>/dev/null; then
+        nvidia-smi --query-gpu=name,memory.total,driver_version \
+                   --format=csv,noheader 2>/dev/null
+    else
+        echo "  no GPU visible."
+        echo "  Add '--runtime=nvidia' to Extra Parameters and install the"
+        echo "  Unraid Nvidia-Driver plugin, then restart this container."
+    fi
+    echo
+    echo "== PyTorch =="
+    python3 - <<'PY'
+try:
+    import torch
+except Exception as e:
+    raise SystemExit(f"  could not import torch: {e}")
+print(f"  torch      {torch.__version__}")
+print(f"  cuda       {torch.version.cuda}")
+ok = torch.cuda.is_available()
+print(f"  available  {ok}")
+if ok:
+    print(f"  device     {torch.cuda.get_device_name(0)}")
+    cap = torch.cuda.get_device_capability(0)
+    arches = torch.cuda.get_arch_list()
+    print(f"  capability sm_{cap[0]}{cap[1]}")
+    print(f"  arch list  {arches}")
+    if f"sm_{cap[0]}{cap[1]}" not in arches:
+        print()
+        print("  WARNING: this PyTorch build has no kernels for your GPU.")
+        print("  Training will fail at the first CUDA kernel launch.")
+        print("  RTX 50-series (Blackwell, sm_120) needs a CUDA 12.8+ build.")
+    else:
+        print()
+        print("  OK -- this PyTorch can drive your GPU.")
+PY
+    echo
+    echo "== Dojo =="
+    if [ -e "$DOJO_DIR/newdojo.sh" ]; then
+        echo "  $DOJO_DIR present, writable: $([ -w "$DOJO_DIR" ] && echo yes || echo NO)"
+        echo "  free space: $(df -h "$DOJO_DIR" | awk 'NR==2{print $4}')"
+    else
+        echo "  $DOJO_DIR is not seeded. Restart the container."
+    fi
+    ;;
+
+dataset)
+    need_dojo
+    [ "$#" -ge 1 ] || die "usage: tms dataset <name>"
+    [ -d "$DOJO_DIR/DATASETS/$1" ] \
+        || die "$DOJO_DIR/DATASETS/$1 does not exist. Put your wavs and metadata.csv there first."
+    cd "$DOJO_DIR/DATASETS" && exec ./create_dataset.sh "$@"
+    ;;
+
+checkpoints)
+    need_dojo
+    [ "$#" -ge 1 ] || die "usage: tms checkpoints <language>, e.g. en-us"
+    cd "$DOJO_DIR/PRETRAINED_CHECKPOINTS" && exec ./download_defaults.sh "$@"
+    ;;
+
+new)
+    need_dojo
+    [ "$#" -ge 1 ] || die "usage: tms new <voice>"
+    cd "$DOJO_DIR" && exec ./newdojo.sh "$@"
+    ;;
+
+train)
+    need_dojo
+    [ "$#" -ge 1 ] || die "usage: tms train <voice>"
+    d="$DOJO_DIR/${1%_dojo}_dojo"
+    [ -d "$d" ] || die "$d does not exist. Create it with: tms new ${1%_dojo}"
+    cd "$d" && exec ./run_training.sh
+    ;;
+
+attach)
+    tmux attach -t training 2>/dev/null \
+        || die "no training session running. Start one with: tms train <voice>"
+    ;;
+
+shell)
+    cd "$DOJO_DIR" 2>/dev/null || cd /app || exit 1
+    exec bash -l
+    ;;
+
+help|-h|--help)
+    usage
+    ;;
+
+*)
+    printf 'tms: unknown command %s\n\n' "$cmd" >&2
+    usage
+    exit 1
+    ;;
+esac

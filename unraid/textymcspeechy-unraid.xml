@@ -1,0 +1,107 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>textymcspeechy</Name>
+  <Repository>ghcr.io/adman234/textymcspeechy-unraid:latest</Repository>
+  <Registry>https://github.com/adman234/TextyMcSpeechy-unraid/pkgs/container/textymcspeechy-unraid</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/adman234/TextyMcSpeechy-unraid/issues</Support>
+  <Project>https://github.com/adman234/TextyMcSpeechy-unraid</Project>
+  <Overview>
+    Train your own Piper TTS voice on your Unraid server's NVIDIA GPU. Give it a folder of speech recordings and a transcript, and it produces a Piper .onnx voice you can drop straight into Home Assistant.
+
+    Self-contained: pull, apply, go. No local image build, no host packages, no scripts to install. Everything runs inside the container.
+
+    HOW TO USE IT: this container has no web interface of its own — it is a workbench you open a terminal into. Click the container icon and choose Console, then run:
+
+      tms doctor              check the GPU is working
+      tms checkpoints en-us   download pretrained voices to build on (one time, ~5GB)
+      tms dataset myvoice     prepare recordings you put in DATASETS/myvoice/
+      tms new myvoice         create a training workspace
+      tms train myvoice       start training
+
+    Run `tms` on its own for the full list. Training opens a live console you can detach from with Ctrl-b then d; it keeps running, and `tms attach` gets you back. Finished voices appear under tts_dojo/myvoice_dojo/tts_voices/ in your appdata.
+
+    REQUIREMENTS: an NVIDIA GPU and the Unraid Nvidia-Driver plugin, with "--runtime=nvidia" left in Extra Parameters. RTX 50-series (Blackwell) cards need a recent driver branch built from NVIDIA's open kernel modules — if `nvidia-smi` on the Unraid terminal does not list your card, fix that first. `tms doctor` checks all of this in a few seconds.
+
+    STORAGE: the image is large (~15GB) and training needs room to work — budget 50GB free. Point the appdata path at an NVMe pool rather than the array, and set that share to Cache: Only so the mover cannot relocate an active training run.
+
+    The port below is TensorBoard, for watching loss curves. It only answers while training is running.
+  </Overview>
+  <Category>Tools: Productivity: Other:</Category>
+  <WebUI>http://[IP]:[PORT:6006]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy-unraid.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy.png</Icon>
+  <ExtraParams>--runtime=nvidia --shm-size=8g</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>An NVIDIA GPU and the Unraid Nvidia-Driver plugin.</Requires>
+
+  <Config Name="Appdata"
+          Target="/app/tts_dojo"
+          Default="/mnt/user/appdata/textymcspeechy"
+          Mode="rw"
+          Description="Everything you make lives here: datasets, pretrained checkpoints, training workspaces and finished voices. It is populated automatically on first start. Put it on an NVMe pool set to Cache: Only — training reads the dataset constantly and writes ~800MB checkpoints every couple of epochs, and the mover relocating that mid-run will bring training to a crawl. Budget 50GB."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/textymcspeechy</Config>
+
+  <Config Name="Nvidia GPU UUID"
+          Target="NVIDIA_VISIBLE_DEVICES"
+          Default="all"
+          Mode=""
+          Description="Which GPU to use. 'all' is right if you have one NVIDIA card. With more than one, paste the GPU-xxxxxxxx-... UUID from Settings -> Nvidia Driver so this container cannot take the card your transcoder or VM is using."
+          Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+
+  <Config Name="Nvidia driver capabilities"
+          Target="NVIDIA_DRIVER_CAPABILITIES"
+          Default="compute,utility"
+          Mode=""
+          Description="What the container may use the driver for. compute,utility is CUDA plus nvidia-smi, which is everything training needs. Do not add 'video' — that is for transcoding."
+          Type="Variable" Display="advanced" Required="true" Mask="false">compute,utility</Config>
+
+  <Config Name="PUID"
+          Target="PUID"
+          Default="99"
+          Mode=""
+          Description="User ID that owns the voices and datasets this container creates. 99 is Unraid's 'nobody' — keeping it means your files look like everything else on the array and stay readable over SMB."
+          Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+
+  <Config Name="PGID"
+          Target="PGID"
+          Default="100"
+          Mode=""
+          Description="Group ID for created files. 100 is Unraid's 'users'."
+          Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+
+  <Config Name="UMASK"
+          Target="UMASK"
+          Default="000"
+          Mode=""
+          Description="File creation mask. 000 makes finished voices group- and other-writable, which is usually what you want for files you will copy off over SMB. Use 022 to tighten it."
+          Type="Variable" Display="advanced" Required="false" Mask="false">000</Config>
+
+  <Config Name="TZ"
+          Target="TZ"
+          Default=""
+          Mode=""
+          Description="Timezone, e.g. Europe/London. Only affects log and checkpoint timestamps."
+          Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Run as root"
+          Target="RUN_AS_ROOT"
+          Default="false"
+          Mode=""
+          Description="Leave false. Set true only if you are compiling custom espeak-ng pronunciation rules, which genuinely need root inside the container. Everything created while this is on will be root-owned."
+          Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
+  <Config Name="TensorBoard"
+          Target="6006"
+          Default="6006"
+          Mode="tcp"
+          Description="TensorBoard, for watching loss curves while training. Nothing listens here when idle, so a refused connection between runs is expected."
+          Type="Port" Display="always" Required="false" Mask="false">6006</Config>
+</Container>
