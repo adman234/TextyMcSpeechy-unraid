@@ -17,6 +17,7 @@ from pathlib import Path
 
 from . import config
 from .jobs import Job
+from .proc import run as sh
 
 QUALITY_CODE = {"x-low": "L", "medium": "M", "high": "H"}
 # Which prepared audio directory each quality trains from, matching the keys
@@ -34,10 +35,38 @@ def dojo_dir(voice: str) -> Path:
 
 def _resample(src: Path, dst: Path, rate: int) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["ffmpeg", "-nostdin", "-y", "-i", str(src), "-ac", "1", "-ar", str(rate), str(dst)],
-        check=True, capture_output=True,
-    )
+    sh(["ffmpeg", "-nostdin", "-y", "-i", str(src),
+        "-ac", "1", "-ar", str(rate), str(dst)])
+
+
+def _create_dojo(voice: str) -> Path:
+    """Create <voice>_dojo from DOJO_CONTENTS.
+
+    Deliberately NOT upstream's newdojo.sh. That script ends with
+    `chown -R 1000:1000`, which assumes the container runs as UID 1000. This
+    image runs as Unraid's 99:100 by default, a non-root user cannot chown to
+    a different UID, and the script's `set -e` then aborts having already
+    created and populated the directory -- so every retry also fails, with
+    "directory already exists". We already run as the user we want files owned
+    by, so the chown was redundant here anyway.
+
+    Idempotent on purpose: it must be safe to re-run after a failed attempt.
+    """
+    dojo = dojo_dir(voice)
+    contents = config.DOJO_DIR / "DOJO_CONTENTS"
+    if not contents.is_dir():
+        raise RuntimeError(
+            f"{contents} is missing. The dojo is not seeded -- restart the container.")
+    dojo.mkdir(parents=True, exist_ok=True)
+    for item in contents.iterdir():
+        dest = dojo / item.name
+        if dest.exists():
+            continue
+        if item.is_dir():
+            shutil.copytree(item, dest, symlinks=True)
+        else:
+            shutil.copy2(item, dest)          # copy2 keeps the executable bit
+    return dojo
 
 
 def export_dataset(project: dict, clip_dir: Path, job: Job) -> Path:
@@ -108,10 +137,8 @@ def prepare_dojo(project: dict, job: Job) -> Path:
     quality = project.get("quality", "medium")
     dojo = dojo_dir(voice)
 
-    if not dojo.exists():
-        job.set(0.85, f"creating {voice}_dojo")
-        subprocess.run(["./newdojo.sh", voice], cwd=config.DOJO_DIR,
-                       check=True, capture_output=True, text=True)
+    job.set(0.85, f"preparing {voice}_dojo")
+    _create_dojo(voice)
 
     target = dojo / "target_voice_dataset"
     target.mkdir(parents=True, exist_ok=True)
@@ -235,18 +262,13 @@ def sample_voice(voice: str, checkpoint: str, text: str, out_wav: Path) -> Path:
     onnx = onnx_dir / f"{ckpt.stem}.onnx"
 
     if not onnx.exists():
-        subprocess.run(
-            ["python3", str(dojo / "scripts" / "utils" / "export_onnx.py"),
-             "--checkpoint", str(ckpt), "--output-file", str(onnx)],
-            cwd="/app/piper", check=True, capture_output=True, text=True,
-        )
+        sh(["python3", str(dojo / "scripts" / "utils" / "export_onnx.py"),
+            "--checkpoint", str(ckpt), "--output-file", str(onnx)],
+           cwd="/app/piper")
         cfg = dojo / "training_folder" / "config.json"
         if cfg.exists():
             shutil.copy(cfg, onnx.with_suffix(".onnx.json"))
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["python3", "-m", "piper", "-m", str(onnx), "-f", str(out_wav)],
-        input=text, text=True, check=True, capture_output=True,
-    )
+    sh(["python3", "-m", "piper", "-m", str(onnx), "-f", str(out_wav)], stdin=text)
     return out_wav

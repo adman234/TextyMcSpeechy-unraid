@@ -105,7 +105,12 @@ export_model(){
         mkdir -p "$voice_folder_path"
     fi
 
-    chown -R 1000:1000 "$voice_folder_path"
+    # Upstream hardcodes 1000:1000, assuming the container runs as UID 1000.
+    # This image runs as PUID/PGID (Unraid's 99:100 by default), where a
+    # non-root user cannot chown to another UID -- and under `set -e` that
+    # aborts the whole script. Chown to whoever we actually are, and never
+    # let it be fatal: the files are already created by the right user.
+    chown -R "$(id -u):$(id -g)" "$voice_folder_path" 2>/dev/null || true
    
     # send an "enter" keystroke to the exporter pane to end the "read" command that is preventing a command prompt from displaying
     tmux send-keys -t "${TMUX_EXPORTER_PANE:-0.3}" Enter  

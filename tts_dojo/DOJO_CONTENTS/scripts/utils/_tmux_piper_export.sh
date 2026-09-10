@@ -80,7 +80,10 @@ update_json() {
     fi
 
     # Use jq to update the JSON
-    jq "${jq_args[@]}" "$jq_program" "$filename" > tmp.json && mv tmp.json "$filename" && chown 1000:1000 "$filename"
+    # The chown that upstream chains here assumed UID 1000; as a non-root
+    # user it fails and takes the whole && chain down with it, losing the
+    # rewritten config. The file is already owned by us.
+    jq "${jq_args[@]}" "$jq_program" "$filename" > tmp.json && mv tmp.json "$filename"
 }
 
 

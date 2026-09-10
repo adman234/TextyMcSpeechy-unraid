@@ -11,20 +11,16 @@ group -- a worse experience, not a broken one.
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 from . import config
 from .jobs import Job
+from .proc import run as sh
 
 
 def probe_duration(path: Path) -> float:
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True, check=True,
-    )
-    return float(out.stdout.strip())
+    return float(sh(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", str(path)]).strip())
 
 
 def probe_bandwidth_hz(path: Path) -> int | None:
@@ -34,24 +30,17 @@ def probe_bandwidth_hz(path: Path) -> int | None:
     a voice trained on it will be permanently dull. Worth warning about before
     the user spends an evening proofreading it.
     """
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "a:0",
-         "-show_entries", "stream=sample_rate",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True, check=False,
-    )
     try:
-        return int(out.stdout.strip())
-    except (TypeError, ValueError):
+        return int(sh(["ffprobe", "-v", "error", "-select_streams", "a:0",
+                       "-show_entries", "stream=sample_rate",
+                       "-of", "default=noprint_wrappers=1:nokey=1", str(path)]).strip())
+    except Exception:                                      # noqa: BLE001
         return None
 
 
 def _decode(src: Path, dst: Path, rate: int) -> None:
-    subprocess.run(
-        ["ffmpeg", "-nostdin", "-y", "-i", str(src),
-         "-ac", "1", "-ar", str(rate), "-vn", str(dst)],
-        check=True, capture_output=True,
-    )
+    sh(["ffmpeg", "-nostdin", "-y", "-i", str(src),
+        "-ac", "1", "-ar", str(rate), "-vn", str(dst)])
 
 
 def transcribe(audio16k: Path, job: Job) -> list[dict]:
@@ -145,12 +134,9 @@ def cut_clips(audio22k: Path, clips: list[dict], out_dir: Path, job: Job) -> Non
         start = max(0.0, clip["start"] - pad)
         dur = (clip["end"] - clip["start"]) + pad * 2
         name = f"clip{n:04d}"
-        subprocess.run(
-            ["ffmpeg", "-nostdin", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
-             "-i", str(audio22k), "-ac", "1", "-ar", str(config.CLIP_RATE),
-             str(out_dir / f"{name}.wav")],
-            check=True, capture_output=True,
-        )
+        sh(["ffmpeg", "-nostdin", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
+            "-i", str(audio22k), "-ac", "1", "-ar", str(config.CLIP_RATE),
+            str(out_dir / f"{name}.wav")])
         clip["id"] = name
         clip["file"] = f"{name}.wav"
         if n % 10 == 0 or n == len(clips):
