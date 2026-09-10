@@ -93,33 +93,75 @@ def api_settings(name: str, body: Settings):
 
 @app.post("/api/projects/{name}/upload")
 async def api_upload(name: str, file: UploadFile = File(...)):
+    """Add a recording to the project. Never replaces an existing one."""
     project = _project_or_404(name)
     dest_dir = projects.project_path(name)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"source{Path(file.filename or 'audio').suffix or '.audio'}"
+
+    index = len(project["sources"]) + 1
+    prefix = f"s{index}"
+    suffix = Path(file.filename or "audio").suffix or ".audio"
+    dest = dest_dir / f"source{index}{suffix}"
     # Streamed, not read into memory: these are hour-plus recordings.
     with dest.open("wb") as fh:
         shutil.copyfileobj(file.file, fh)
-    project["source"] = dest.name
+
+    project["sources"].append({
+        "file": dest.name,
+        "original": file.filename,
+        "prefix": prefix,
+        "imported": False,
+        "clips": 0,
+    })
     project["status"] = "uploaded"
     projects.save(project)
-    return {"ok": True, "file": dest.name,
+    return {"ok": True, "file": dest.name, "prefix": prefix,
+            "pending": sum(1 for s in project["sources"] if not s["imported"]),
             "size_mb": round(dest.stat().st_size / 1e6, 1)}
 
 
 @app.post("/api/projects/{name}/import")
 def api_import(name: str):
+    """Transcribe every recording that has not been imported yet.
+
+    Clips are APPENDED. An earlier version replaced the whole clip list here,
+    which silently destroyed the transcripts the user had already corrected --
+    the most expensive thing in the project.
+    """
     project = _project_or_404(name)
-    if not project.get("source"):
-        raise HTTPException(400, "upload an audio file first")
-    source = projects.project_path(name) / project["source"]
+    pending = [s for s in project["sources"] if not s.get("imported")]
+    if not pending:
+        raise HTTPException(
+            400, "nothing new to import -- upload a recording first."
+            if not project["sources"] else
+            "every uploaded recording has already been imported.")
 
     def work(job: Job):
-        result = importer.run_import(projects.project_path(name), source, job)
-        fresh = projects.load(name)
-        fresh.update({**result, "status": "review"})
-        projects.save(fresh)
-        return {"clips": len(result["clips"])}
+        added = 0
+        for n, source in enumerate(pending, 1):
+            job.set(message=f"importing {source.get('original') or source['file']} "
+                            f"({n} of {len(pending)})")
+            fresh = projects.load(name)
+            # Speaker groups are clustered per recording and both start at 0,
+            # so shift this one past everything already in the project.
+            offset = max((c.get("speaker", 0) for c in fresh["clips"]), default=-1) + 1
+            result = importer.run_import(
+                projects.project_path(name), projects.project_path(name) / source["file"],
+                job, prefix=source["prefix"], speaker_offset=offset,
+            )
+            fresh = projects.load(name)
+            fresh["clips"].extend(result["clips"])
+            fresh["duration"] = fresh.get("duration", 0.0) + result["duration"]
+            fresh["speakers"] = offset + result["speakers"]
+            fresh["warnings"] = (fresh.get("warnings") or []) + result["warnings"]
+            fresh["status"] = "review"
+            for s in fresh["sources"]:
+                if s["prefix"] == source["prefix"]:
+                    s["imported"] = True
+                    s["clips"] = len(result["clips"])
+            projects.save(fresh)
+            added += len(result["clips"])
+        return {"clips": added}
 
     try:
         return RUNNER.start("import", work).as_dict()

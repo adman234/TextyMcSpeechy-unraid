@@ -40,7 +40,24 @@ def load(name: str) -> dict:
     path = manifest_path(name)
     if not path.is_file():
         raise FileNotFoundError(f"no project named {name!r}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _migrate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def _migrate(project: dict) -> dict:
+    """Bring a project written by an older version up to the current shape.
+
+    Projects used to hold a single `source` filename. They now hold a list, so
+    that several recordings can be pooled into one voice.
+    """
+    if "sources" not in project:
+        legacy = project.pop("source", None)
+        project["sources"] = (
+            [{"file": legacy, "prefix": "s1", "imported": True,
+              "clips": len(project.get("clips", []))}] if legacy else []
+        )
+    for clip in project.get("clips", []):
+        clip.setdefault("source", "s1")
+    return project
 
 
 def save(project: dict) -> None:
@@ -72,7 +89,7 @@ def create(name: str, **fields) -> dict:
         "from_scratch": False,
         "restart": False,
         "status": "empty",
-        "source": None,
+        "sources": [],
         "duration": 0.0,
         "speakers": 0,
         "warnings": [],
@@ -115,6 +132,7 @@ def stats(project: dict) -> dict:
     included = [c for c in clips if c.get("include")]
     secs = sum(c["end"] - c["start"] for c in included)
     return {
+        "sources": len(project.get("sources", [])),
         "total": len(clips),
         "included": len(included),
         "included_seconds": round(secs, 1),

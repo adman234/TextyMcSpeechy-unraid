@@ -121,7 +121,8 @@ def group_words(words: list[dict]) -> list[dict]:
     return clips
 
 
-def cut_clips(audio22k: Path, clips: list[dict], out_dir: Path, job: Job) -> None:
+def cut_clips(audio22k: Path, clips: list[dict], out_dir: Path, job: Job,
+              prefix: str = "s1") -> None:
     """Write one wav per clip, with a little room tone kept at each edge.
 
     Trimming hard to the word boundary teaches the model clicks, and clipping
@@ -133,7 +134,9 @@ def cut_clips(audio22k: Path, clips: list[dict], out_dir: Path, job: Job) -> Non
         job.raise_if_cancelled()
         start = max(0.0, clip["start"] - pad)
         dur = (clip["end"] - clip["start"]) + pad * 2
-        name = f"clip{n:04d}"
+        # Namespaced by source: a project can hold several recordings, and
+        # clip0001 from each would otherwise overwrite the others on disk.
+        name = f"{prefix}c{n:04d}"
         sh(["ffmpeg", "-nostdin", "-y", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}",
             "-i", str(audio22k), "-ac", "1", "-ar", str(config.CLIP_RATE),
             str(out_dir / f"{name}.wav")])
@@ -208,8 +211,15 @@ def cluster_speakers(clip_dir: Path, clips: list[dict], job: Job) -> int:
         return 1
 
 
-def run_import(project_dir: Path, source: Path, job: Job) -> dict:
-    """Full pipeline. Returns the project manifest."""
+def run_import(project_dir: Path, source: Path, job: Job,
+               prefix: str = "s1", speaker_offset: int = 0) -> dict:
+    """Import one recording. Returns its clips and metadata.
+
+    `prefix` namespaces clip ids and filenames, and `speaker_offset` shifts this
+    recording's speaker groups past any already in the project -- two recordings
+    clustered independently both start their groups at 0, and merging them
+    without an offset would silently claim two different people are the same.
+    """
     work = project_dir / "work"
     work.mkdir(parents=True, exist_ok=True)
     clip_dir = project_dir / "clips"
@@ -232,13 +242,14 @@ def run_import(project_dir: Path, source: Path, job: Job) -> dict:
     if not clips:
         raise RuntimeError("transcription produced no usable clips")
 
-    cut_clips(a22, clips, clip_dir, job)
+    cut_clips(a22, clips, clip_dir, job, prefix=prefix)
     speakers = cluster_speakers(clip_dir, clips, job)
 
     for clip in clips:
-        clip.setdefault("speaker", 0)
+        clip["speaker"] = clip.get("speaker", 0) + speaker_offset
         clip["include"] = True
         clip["edited"] = False
+        clip["source"] = prefix
 
     # The master decode is large and only needed during import.
     for leftover in (a16, a22):
@@ -254,7 +265,7 @@ def run_import(project_dir: Path, source: Path, job: Job) -> dict:
     return {
         "duration": duration,
         "source_rate": source_rate,
-        "speakers": speakers,
+        "speakers": speakers,          # groups found in THIS recording
         "clips": clips,
         "warnings": warnings,
     }

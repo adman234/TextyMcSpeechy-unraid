@@ -31,6 +31,10 @@ jobs:
         # Regression cover for the chown-1000 failure: creating a dojo must work
         # as a non-1000 user, and must be safe to re-run after a failed attempt.
         run: python3 unraid/webui/tests/test_dojo_setup.py
+      - name: Test project state
+        # Guards the destructive-import regression: correcting transcripts is
+        # the most expensive thing a user does, and it must survive everything.
+        run: python3 unraid/webui/tests/test_projects.py
       - name: Test clip grouping
         # Pure logic, no ML deps: grouping decides what the model trains on, and
         # a regression here degrades the voice silently rather than erroring.

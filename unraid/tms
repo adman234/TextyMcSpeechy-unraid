@@ -36,6 +36,9 @@ tms -- TextyMcSpeechy on Unraid
   tms new <voice>         Create a <voice>_dojo to train in.
   tms train <voice>       Start (or resume) training <voice>_dojo.
   tms attach              Reattach to a training session you detached from.
+  tms recover <ds> <proj> Rebuild a project's clips from an exported dataset in
+                          DATASETS/, transcripts included. Use this if a project
+                          lost its clips but you had already trained from it.
   tms shell               A shell in the dojo, for anything not covered above.
 
 Typical first run:
@@ -139,6 +142,11 @@ train)
 attach)
     tmux attach -t training 2>/dev/null \
         || die "no training session running. Start one with: tms train <voice>"
+    ;;
+
+recover)
+    [ "$#" -ge 2 ] || die "usage: tms recover <dataset> <project>"
+    exec python3 -m tms_web.recover "$@"
     ;;
 
 shell)

@@ -48,15 +48,18 @@
   <!-- 2. Import -->
   <section id="view-import" class="view">
     <h2>Import audio</h2>
-    <p class="hint">Drop in one long recording. It gets split into clips and
-      transcribed, then you review them in the next step.</p>
+    <p class="hint">Drop in a long recording. It gets split into clips and
+      transcribed, then you review them in the next step. You can add several
+      recordings to one voice — clips from each are <b>added</b> to the project,
+      never replacing what is already there.</p>
+    <div id="sources" class="cards"></div>
     <div id="drop" class="drop">
       <input type="file" id="file" accept="audio/*,video/*" hidden>
       <p><strong>Drop an audio file here</strong> or <button id="browse" class="link">browse</button></p>
       <p class="hint">mp3, wav, m4a, flac — an hour or two is fine.</p>
     </div>
     <div id="upload-info" class="notice" hidden></div>
-    <button id="start-import" class="primary" disabled>Split &amp; transcribe</button>
+    <button id="start-import" class="primary" disabled>Split &amp; transcribe new recordings</button>
     <div id="import-progress" class="progress-wrap" hidden>
       <div class="bar"><div class="fill"></div></div>
       <div class="progress-text"></div>

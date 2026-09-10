@@ -105,11 +105,7 @@ async function openProject(name) {
   $("#scratch").checked = !!state.project.from_scratch;
   $("#restart").checked = !!state.project.restart;
   const hasClips = (state.project.clips || []).length > 0;
-  $("#upload-info").hidden = !state.project.source;
-  if (state.project.source) {
-    $("#upload-info").textContent = `Uploaded: ${state.project.source}`;
-    $("#start-import").disabled = false;
-  }
+  renderSources();
   show(hasClips ? "review" : "import");
   pollJobs();
 }
@@ -139,8 +135,10 @@ async function upload(f) {
   body.append("file", f);
   try {
     const r = await api(`/api/projects/${state.project.name}/upload`, { method: "POST", body });
-    info.textContent = `Uploaded ${r.file} (${r.size_mb} MB). Ready to split and transcribe.`;
-    $("#start-import").disabled = false;
+    state.project = await api(`/api/projects/${state.project.name}`);
+    renderSources();
+    info.textContent = `Added ${f.name} (${r.size_mb} MB). ` +
+      `${r.pending} recording${r.pending === 1 ? "" : "s"} waiting to be transcribed.`;
   } catch (e) {
     info.textContent = `Upload failed: ${e.message}`;
     toast(e.message, true);
@@ -152,15 +150,40 @@ async function startImport() {
   try {
     const job = await api(`/api/projects/${state.project.name}/import`, { method: "POST" });
     trackJob(job.id, "#import-progress", async () => {
+      const before = (state.project.clips || []).length;
       state.project = await api(`/api/projects/${state.project.name}`);
       gateSteps();
+      renderSources();
       renderStats();
       show("review");
-      toast(`${state.project.clips.length} clips ready to review`);
+      const added = state.project.clips.length - before;
+      toast(before
+        ? `${added} clips added — ${state.project.clips.length} in total`
+        : `${state.project.clips.length} clips ready to review`);
     });
   } catch (e) {
     toast(e.message, true);
     $("#start-import").disabled = false;
+  }
+}
+
+function renderSources() {
+  const list = state.project?.sources || [];
+  const el = $("#sources");
+  if (!el) return;
+  el.innerHTML = list.map(s => `
+    <div class="card">
+      <b>${esc(s.original || s.file)}</b>
+      <span class="meta">${s.imported
+        ? `${s.clips} clips`
+        : `<span class="low">not transcribed yet</span>`}</span>
+    </div>`).join("");
+  const pending = list.filter(s => !s.imported).length;
+  $("#start-import").disabled = pending === 0;
+  const info = $("#upload-info");
+  if (list.length && pending === 0) {
+    info.hidden = false;
+    info.textContent = "All recordings transcribed. Add another, or go to Review.";
   }
 }
 
