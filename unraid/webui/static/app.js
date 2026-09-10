@@ -70,7 +70,9 @@ async function loadHealth() {
       : `<span class="bad">no GPU — check --runtime=nvidia</span>`);
     bits.push(`${h.free_gb} GB free`);
     if (!h.has_checkpoints) {
-      bits.push(`<span class="bad">no pretrained checkpoints — run <code>tms checkpoints en-us</code></span>`);
+      // Do not name a language here: en-us is the wrong advice for a British,
+      // Australian or Irish voice, and this banner is the first thing read.
+      bits.push(`<span class="bad">no pretrained checkpoints — run <code>tms checkpoints &lt;lang&gt;</code> on the console (<code>en-gb</code> or <code>en-us</code>)</span>`);
     }
     $("#health").innerHTML = bits.join(" · ");
   } catch { $("#health").textContent = ""; }

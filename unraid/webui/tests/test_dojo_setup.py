@@ -152,6 +152,45 @@ def test_x_low_quality_links_the_16k_audio(tmp):
     assert (d / "target_voice_dataset" / ".QUALITY").read_text().strip() == "L"
 
 
+@with_temp_dojo
+def test_missing_checkpoint_refuses_rather_than_training_from_scratch(tmp):
+    """Silently falling back wasted hours before the user could find out.
+
+    From-scratch training needs orders of magnitude more audio and time than a
+    fine-tune, so it has to be chosen, not stumbled into.
+    """
+    project = {"voice_name": "joey", "dataset_name": "joey", "quality": "medium",
+               "voice_type": "M", "batch_size": 8, "num_workers": 8,
+               "from_scratch": False}
+    dojo.prepare_dojo(project, FakeJob())
+    try:
+        dojo.start_training(project, FakeJob())
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "No pretrained" in msg, msg
+        assert "tms checkpoints" in msg, "must say how to fix it"
+        assert "en-gb" in msg, "must not only suggest the American pack"
+    else:
+        raise AssertionError("training must refuse without a checkpoint")
+
+
+@with_temp_dojo
+def test_finds_the_highest_epoch_checkpoint(tmp):
+    folder = tmp / "PRETRAINED_CHECKPOINTS" / "default" / "M_voice" / "medium"
+    folder.mkdir(parents=True)
+    original = config.CHECKPOINTS_DIR
+    try:
+        config.CHECKPOINTS_DIR = tmp / "PRETRAINED_CHECKPOINTS"
+        for name in ("epoch=9-step=1.ckpt", "epoch=2307-step=558536.ckpt",
+                     "epoch=100-step=99.ckpt"):
+            (folder / name).write_text("x")
+        found = dojo.find_pretrained("M", "medium")
+        assert found is not None and "2307" in found.name, \
+            f"picked {found} -- epochs must compare numerically, not as strings"
+    finally:
+        config.CHECKPOINTS_DIR = original
+
+
 def run() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

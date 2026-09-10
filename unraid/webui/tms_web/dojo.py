@@ -185,12 +185,25 @@ def start_training(project: dict, job: Job) -> None:
     ckpt = ""
     if not project.get("from_scratch"):
         found = find_pretrained(project.get("voice_type", "M"), quality)
-        if found:
-            ckpt = str(found.resolve())
-            job.set(message=f"fine-tuning from {found.name}")
-        else:
-            job.set(message="no pretrained checkpoint found; training from scratch "
-                            "(much slower -- run 'tms checkpoints en-us' to fix)")
+        if not found:
+            # Deliberately fatal. Quietly falling back to from-scratch training
+            # burns tens of hours and needs far more data than a fine-tune, so
+            # the user must choose it rather than arrive at it by accident.
+            voice_type = project.get("voice_type", "M")
+            raise RuntimeError(
+                f"No pretrained {quality} checkpoint for a {voice_type}_voice.\n"
+                f"Expected a .ckpt in PRETRAINED_CHECKPOINTS/default/"
+                f"{voice_type}_voice/{quality}/.\n\n"
+                "Download a set from the container console, picking the language "
+                "closest to your speaker's accent:\n"
+                "    tms checkpoints en-gb     (British, and the better match for "
+                "Australian, Irish and other non-rhotic accents)\n"
+                "    tms checkpoints en-us     (American)\n\n"
+                "Or tick 'train from scratch' if you really mean it -- that needs "
+                "hours of audio and days of training, not minutes."
+            )
+        ckpt = str(found.resolve())
+        job.set(message=f"fine-tuning from {found.name}")
 
     cmd = ["bash", "utils/piper_training.sh"] + ([ckpt] if ckpt else [])
     job.set(0.0, "starting training")

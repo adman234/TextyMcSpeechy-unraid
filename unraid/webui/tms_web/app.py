@@ -276,7 +276,9 @@ def api_health():
         "gpu": gpu,
         "gpu_supported": supported,
         "free_gb": round(usage.free / 1e9, 1),
-        "has_checkpoints": dojo.find_pretrained("M", "medium") is not None,
+        # Any checkpoint at all, not just the M/medium pair: the banner should
+        # not nag someone who downloaded a different voice type or quality.
+        "has_checkpoints": any(config.CHECKPOINTS_DIR.glob("default/*_voice/*/*.ckpt")),
     }
 
 
