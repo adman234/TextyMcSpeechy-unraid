@@ -75,11 +75,15 @@ class Settings(BaseModel):
     piper_prefix: str | None = None
     batch_size: int | None = None
     from_scratch: bool | None = None
+    restart: bool | None = None
 
 
 @app.patch("/api/projects/{name}/settings")
 def api_settings(name: str, body: Settings):
     project = _project_or_404(name)
+    # Note the `is not None` test: False is a real value for the boolean
+    # flags here, and filtering on truthiness would make them impossible to
+    # turn off again.
     project.update({k: v for k, v in body.model_dump().items() if v is not None})
     projects.save(project)
     return {"ok": True}

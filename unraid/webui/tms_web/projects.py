@@ -70,6 +70,7 @@ def create(name: str, **fields) -> dict:
         "batch_size": fields.get("batch_size", 8),
         "num_workers": fields.get("num_workers", 8),
         "from_scratch": False,
+        "restart": False,
         "status": "empty",
         "source": None,
         "duration": 0.0,

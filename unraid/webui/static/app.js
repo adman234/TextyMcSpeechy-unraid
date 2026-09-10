@@ -103,6 +103,7 @@ async function openProject(name) {
   renderStats();
   $("#batch").value = state.project.batch_size ?? 8;
   $("#scratch").checked = !!state.project.from_scratch;
+  $("#restart").checked = !!state.project.restart;
   const hasClips = (state.project.clips || []).length > 0;
   $("#upload-info").hidden = !state.project.source;
   if (state.project.source) {
@@ -357,6 +358,15 @@ async function loadCheckpoints() {
   if (!state.project) return;
   let list = [];
   try { list = await api(`/api/projects/${state.project.name}/checkpoints`); } catch { /* none yet */ }
+  const resumable = list.filter(c => /val_(mel|mos)=/.test(c.name));
+  const note = $("#resume-note");
+  if (note) {
+    note.innerHTML = resumable.length && !$("#restart").checked
+      ? `Will <b>continue</b> from epoch ${resumable[0].epoch}.`
+      : (resumable.length
+          ? `"Start over" is ticked — the epoch counter restarts from the pretrained checkpoint.`
+          : `No checkpoint from this voice yet — training will start from the pretrained one.`);
+  }
   $("#checkpoints").innerHTML = list.length
     ? list.slice(0, 24).map(c => `
       <div class="card">
@@ -376,6 +386,7 @@ function wireTrain() {
         body: JSON.stringify({
           batch_size: Number($("#batch").value),
           from_scratch: $("#scratch").checked,
+          restart: $("#restart").checked,
         }),
       });
       const job = await api(`/api/projects/${state.project.name}/train`, { method: "POST" });
@@ -394,6 +405,7 @@ function wireTrain() {
   };
 
   $("#refresh-ckpts").onclick = loadCheckpoints;
+  $("#restart").onchange = loadCheckpoints;
 
   $("#checkpoints").addEventListener("click", async e => {
     const btn = e.target.closest("[data-sample]");

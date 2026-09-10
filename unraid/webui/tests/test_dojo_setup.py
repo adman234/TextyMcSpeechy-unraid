@@ -191,6 +191,57 @@ def test_finds_the_highest_epoch_checkpoint(tmp):
         config.CHECKPOINTS_DIR = original
 
 
+def _ckpt(folder: Path, name: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    f = folder / name
+    f.write_text("x")
+    return f
+
+
+@with_temp_dojo
+def test_resumes_from_the_dojos_own_latest_checkpoint(tmp):
+    d = dojo._create_dojo("joey")
+    logs = d / "training_folder" / "lightning_logs" / "version_0" / "checkpoints"
+    _ckpt(logs, "epoch=12-val_mel=0.51.ckpt")
+    _ckpt(logs, "epoch=52-val_mel=0.42.ckpt")
+    _ckpt(logs, "epoch=30-val_mos=0.60.ckpt")
+    found = dojo.find_resume_checkpoint("joey")
+    assert found is not None and "epoch=52" in found.name, found
+
+
+@with_temp_dojo
+def test_ignores_last_ckpt_which_would_silently_restart(tmp):
+    """last.ckpt has no val_mel=/val_mos= in its name, so piper_fit.py takes
+    its legacy branch and resets the epoch counter to zero. Picking it would
+    look like a resume and quietly throw the run away."""
+    d = dojo._create_dojo("joey")
+    logs = d / "training_folder" / "lightning_logs" / "version_0" / "checkpoints"
+    _ckpt(logs, "last.ckpt")
+    assert dojo.find_resume_checkpoint("joey") is None
+
+
+@with_temp_dojo
+def test_ignores_legacy_step_named_checkpoints(tmp):
+    """A pretrained checkpoint (epoch=N-step=M) also hits the legacy branch."""
+    d = dojo._create_dojo("joey")
+    _ckpt(d / "voice_checkpoints", "epoch=6339-step=1647790.ckpt")
+    assert dojo.find_resume_checkpoint("joey") is None
+
+
+@with_temp_dojo
+def test_no_checkpoints_means_no_resume(tmp):
+    dojo._create_dojo("joey")
+    assert dojo.find_resume_checkpoint("joey") is None
+
+
+@with_temp_dojo
+def test_resume_checkpoint_is_found_in_voice_checkpoints_too(tmp):
+    d = dojo._create_dojo("joey")
+    _ckpt(d / "voice_checkpoints", "epoch=7-val_mos=0.3.ckpt")
+    found = dojo.find_resume_checkpoint("joey")
+    assert found is not None and "epoch=7" in found.name
+
+
 def run() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

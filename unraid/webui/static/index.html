@@ -97,9 +97,15 @@
       <div class="row">
         <label>Batch size <input type="number" id="batch" min="1" max="64" value="8"></label>
         <label class="check"><input type="checkbox" id="scratch"> train from scratch</label>
+        <label class="check"><input type="checkbox" id="restart"> start over</label>
       </div>
       <p class="hint">Bigger batches train faster until VRAM runs out. Leave
         "from scratch" off — fine-tuning a pretrained checkpoint is far quicker.</p>
+      <p class="hint" id="resume-note"></p>
+      <p class="hint">Training picks up from its own latest checkpoint, so
+        stopping it — or restarting the container — costs you at most the
+        epochs since the last save. Tick "start over" only if you have changed
+        the clips and want to discard the epochs trained on the old ones.</p>
       <button id="start-train" class="primary">Start training</button>
       <button id="stop-train" class="danger" hidden>Stop training</button>
     </div>

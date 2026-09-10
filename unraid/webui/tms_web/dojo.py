@@ -120,11 +120,32 @@ def find_pretrained(voice_type: str, quality: str) -> Path | None:
     if not ckpts:
         return None
 
-    def epoch(path: Path) -> int:
-        m = re.search(r"epoch=(\d+)", path.name)
-        return int(m.group(1)) if m else -1
+    return max(ckpts, key=_epoch_of)
 
-    return max(ckpts, key=epoch)
+
+def _epoch_of(path: Path) -> int:
+    m = re.search(r"epoch=(\d+)", path.name)
+    return int(m.group(1)) if m else -1
+
+
+def find_resume_checkpoint(voice: str) -> Path | None:
+    """The newest checkpoint from this dojo's OWN previous training, if any.
+
+    Only checkpoints whose filename carries val_mel= or val_mos= qualify.
+    piper_fit.py decides resume-vs-restart purely by that pattern: anything
+    else -- last.ckpt, or a pretrained checkpoint named epoch=N-step=M -- takes
+    its "legacy" branch, which loads the weights but restarts the epoch counter
+    and the optimizer at zero. Handing it the wrong file does not error, it
+    just silently throws away your training progress.
+    """
+    dojo = dojo_dir(voice)
+    found: list[Path] = []
+    for folder in (dojo / "voice_checkpoints",
+                   dojo / "training_folder" / "lightning_logs"):
+        if folder.is_dir():
+            found += [p for p in folder.rglob("*.ckpt")
+                      if re.search(r"val_(?:mel|mos)=", p.name)]
+    return max(found, key=_epoch_of) if found else None
 
 
 def prepare_dojo(project: dict, job: Job) -> Path:
@@ -177,12 +198,22 @@ def prepare_dojo(project: dict, job: Job) -> Path:
 
 
 def start_training(project: dict, job: Job) -> None:
-    """Run piper_training.sh, streaming its output into the job log."""
+    """Resume this dojo's training, or start a fine-tune from a pretrained one."""
     voice = project["voice_name"]
     dojo = dojo_dir(voice)
     quality = project.get("quality", "medium")
 
     ckpt = ""
+    # Continue this dojo's own run unless the user explicitly asked to start
+    # over. Without this a restart -- deliberate, or just a container bounce --
+    # silently threw away every epoch trained so far.
+    if not project.get("from_scratch") and not project.get("restart"):
+        resume = find_resume_checkpoint(voice)
+        if resume:
+            job.set(message=f"resuming from epoch {_epoch_of(resume)} ({resume.name})")
+            _run_training(dojo, str(resume.resolve()), job)
+            return
+
     if not project.get("from_scratch"):
         found = find_pretrained(project.get("voice_type", "M"), quality)
         if not found:
@@ -205,6 +236,11 @@ def start_training(project: dict, job: Job) -> None:
         ckpt = str(found.resolve())
         job.set(message=f"fine-tuning from {found.name}")
 
+    _run_training(dojo, ckpt, job)
+
+
+def _run_training(dojo: Path, ckpt: str, job: Job) -> None:
+    """Run piper_training.sh, streaming its output into the job log."""
     cmd = ["bash", "utils/piper_training.sh"] + ([ckpt] if ckpt else [])
     job.set(0.0, "starting training")
     proc = subprocess.Popen(
