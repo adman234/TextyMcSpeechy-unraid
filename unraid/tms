@@ -26,6 +26,10 @@ usage() {
 cat <<'USAGE'
 tms -- TextyMcSpeechy on Unraid
 
+  The web UI on port 8080 does all of this with a browser, including
+  reviewing and correcting transcriptions. These commands are the same
+  workflow for anyone who prefers a terminal.
+
   tms doctor              Check the GPU, driver and PyTorch build. Run this first.
   tms dataset <name>      Prepare tts_dojo/DATASETS/<name> for training.
   tms checkpoints <lang>  Download pretrained checkpoints, e.g. en-us. Once, ~5GB.

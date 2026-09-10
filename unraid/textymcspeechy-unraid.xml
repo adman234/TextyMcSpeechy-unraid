@@ -14,15 +14,13 @@
 
     Self-contained: pull, apply, go. No local image build, no host packages, no scripts to install. Everything runs inside the container.
 
-    HOW TO USE IT: this container has no web interface of its own — it is a workbench you open a terminal into. Click the container icon and choose Console, then run:
+    HOW TO USE IT: click the WebUI button. Drop in one long recording — an interview, a podcast episode, a couple of hours is fine — and press a button. It is split into clips and transcribed automatically, and clips are grouped by who is speaking, so on a two-person podcast you keep only your target speaker in one click.
 
-      tms doctor              check the GPU is working
-      tms checkpoints en-us   download pretrained voices to build on (one time, ~5GB)
-      tms dataset myvoice     prepare recordings you put in DATASETS/myvoice/
-      tms new myvoice         create a training workspace
-      tms train myvoice       start training
+    You then review the clips in the browser: play each one, fix any transcription mistakes, and exclude the ones you do not want. Getting the transcripts right is the single biggest factor in how good the finished voice sounds, so this step is built to be fast — J and K move, Space plays, E includes or excludes, Enter edits.
 
-    Run `tms` on its own for the full list. Training opens a live console you can detach from with Ctrl-b then d; it keeps running, and `tms attach` gets you back. Finished voices appear under tts_dojo/myvoice_dojo/tts_voices/ in your appdata.
+    When you are happy, press Start training. The web UI shows live progress, and once checkpoints appear you can type a sentence and hear what the voice sounds like at each one. That is how you decide it is done. Training keeps running if you close the tab.
+
+    Prefer a terminal? Everything is also available through the `tms` command on the container console — run `tms` for the list, or `tms doctor` to check the GPU.
 
     REQUIREMENTS: an NVIDIA GPU and the Unraid Nvidia-Driver plugin, with "--runtime=nvidia" left in Extra Parameters. RTX 50-series (Blackwell) cards need a recent driver branch built from NVIDIA's open kernel modules — if `nvidia-smi` on the Unraid terminal does not list your card, fix that first. `tms doctor` checks all of this in a few seconds.
 
@@ -32,10 +30,12 @@
 
     Two things to know about that limit: the 8g of shared memory counts toward it, and raising PIPER_BATCH_SIZE raises host RAM use as well as VRAM. If a run dies with "DataLoader worker (pid N) is killed by signal", that is this cap rather than a bug. Run `docker stats textymcspeechy` during training to see actual use, then set the cap to roughly 1.5x the peak.
 
-    The port below is TensorBoard, for watching loss curves. It only answers while training is running.
+    FIRST RUN: pretrained checkpoints are a separate ~5GB download that training builds on. Get them with `tms checkpoints en-us` on the console. The web UI warns you if they are missing. Speech recognition models also download on first import (~3GB) into appdata, not into the image.
+
+    Ports below: 8080 is the web UI. 6006 is TensorBoard for loss curves, which only answers while training is running.
   </Overview>
   <Category>Tools: Productivity: Other:</Category>
-  <WebUI>http://[IP]:[PORT:6006]/</WebUI>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy-unraid.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy.png</Icon>
   <ExtraParams>--runtime=nvidia --shm-size=8g --memory=24g --memory-swap=24g --memory-swappiness=0</ExtraParams>
@@ -101,6 +101,13 @@
           Mode=""
           Description="Leave false. Set true only if you are compiling custom espeak-ng pronunciation rules, which genuinely need root inside the container. Everything created while this is on will be root-owned."
           Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+
+  <Config Name="WebUI"
+          Target="8080"
+          Default="8080"
+          Mode="tcp"
+          Description="The web interface: import a recording, review and correct the transcriptions, then train and listen to the result. This is the main way to use the container."
+          Type="Port" Display="always" Required="true" Mask="false">8080</Config>
 
   <Config Name="TensorBoard"
           Target="6006"

@@ -96,7 +96,8 @@ else
 fi
 
 if [ "${DROP_PRIVS}" = "true" ]; then
-    log "ready as ${TMS_USER} (uid=${PUID} gid=${PGID}). Open the console and run: tms"
+    log "ready as ${TMS_USER} (uid=${PUID} gid=${PGID})"
+    log "Web UI on port 8080. Console users: run 'tms' for the same workflow."
     export HOME="/home/${TMS_USER}" USER="${TMS_USER}"
     exec /usr/bin/tini -g -- gosu "${TMS_USER}" "$@"
 fi

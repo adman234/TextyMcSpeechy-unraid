@@ -66,6 +66,17 @@ RUN python3.12 -m venv .venv && \
     bash /app/piper/build_monotonic_align.sh && \
     /app/piper/.venv/bin/pip cache purge
 
+# Web UI stack. faster-whisper does the transcription (CTranslate2, GPU), and
+# speechbrain provides the voice embeddings used to group speakers -- chosen
+# over pyannote because pyannote's diarization models sit behind a Hugging Face
+# licence acceptance, which would turn "install the container" into "go make an
+# account". Model weights download at first use into appdata, not into the
+# image, so this adds far less than the models themselves weigh.
+RUN /app/piper/.venv/bin/pip install \
+      "fastapi>=0.110" "uvicorn[standard]>=0.27" python-multipart \
+      faster-whisper speechbrain scipy \
+ && /app/piper/.venv/bin/pip cache purge
+
 ENV PATH="/app/piper/.venv/bin:$PATH"
 ENV CUDA_VISIBLE_DEVICES=0
 
@@ -87,17 +98,21 @@ COPY unraid/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY unraid/profile-banner.sh /etc/profile.d/00-textymcspeechy.sh
 # Replaces upstream's compose launcher, which has nothing to launch here.
 COPY unraid/run_container.sh /app/run_container.sh
+COPY unraid/webui /opt/tms-web
 
 RUN chmod +x /usr/local/bin/docker /usr/local/bin/tms \
              /usr/local/bin/entrypoint.sh /app/run_container.sh \
  && printf 'source /etc/profile.d/00-textymcspeechy.sh\n' >> /root/.bashrc
 
+ENV PYTHONPATH=/opt/tms-web
+
 WORKDIR /app/tts_dojo
 VOLUME ["/app/tts_dojo"]
-EXPOSE 6006
+EXPOSE 6006 8080
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-# Not a daemon: the container holds a ready GPU environment you attach to with
-# the Unraid console button and drive with `tms`.
-CMD ["sleep", "infinity"]
+# The web UI is the front door; `tms` on the console does the same work for
+# anyone who would rather drive it from a shell.
+CMD ["uvicorn", "tms_web.app:app", "--host", "0.0.0.0", "--port", "8080", \
+     "--log-level", "warning"]

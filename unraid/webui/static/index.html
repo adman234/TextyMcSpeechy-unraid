@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TextyMcSpeechy</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="wave"></span> TextyMcSpeechy</div>
+  <div id="health" class="health"></div>
+</header>
+
+<nav class="steps">
+  <button class="step" data-view="projects">1 · Projects</button>
+  <button class="step" data-view="import">2 · Import</button>
+  <button class="step" data-view="review">3 · Review</button>
+  <button class="step" data-view="train">4 · Train</button>
+</nav>
+
+<main>
+  <!-- 1. Projects -->
+  <section id="view-projects" class="view">
+    <h2>Projects</h2>
+    <p class="hint">A project is one recording and the clips made from it.</p>
+    <div id="project-list" class="cards"></div>
+    <form id="new-project" class="panel">
+      <h3>New project</h3>
+      <div class="row">
+        <label>Name <input name="name" placeholder="grandpa" required></label>
+        <label>Voice type
+          <select name="voice_type"><option value="M">Masculine</option><option value="F">Feminine</option></select>
+        </label>
+        <label>Quality
+          <select name="quality">
+            <option value="medium">medium (recommended)</option>
+            <option value="high">high</option>
+            <option value="x-low">x-low</option>
+          </select>
+        </label>
+        <label>Language <input name="espeak_language" value="en-us"></label>
+      </div>
+      <button class="primary" type="submit">Create</button>
+    </form>
+  </section>
+
+  <!-- 2. Import -->
+  <section id="view-import" class="view">
+    <h2>Import audio</h2>
+    <p class="hint">Drop in one long recording. It gets split into clips and
+      transcribed, then you review them in the next step.</p>
+    <div id="drop" class="drop">
+      <input type="file" id="file" accept="audio/*,video/*" hidden>
+      <p><strong>Drop an audio file here</strong> or <button id="browse" class="link">browse</button></p>
+      <p class="hint">mp3, wav, m4a, flac — an hour or two is fine.</p>
+    </div>
+    <div id="upload-info" class="notice" hidden></div>
+    <button id="start-import" class="primary" disabled>Split &amp; transcribe</button>
+    <div id="import-progress" class="progress-wrap" hidden>
+      <div class="bar"><div class="fill"></div></div>
+      <div class="progress-text"></div>
+      <button id="cancel-import" class="link">cancel</button>
+      <pre class="log"></pre>
+    </div>
+  </section>
+
+  <!-- 3. Review -->
+  <section id="view-review" class="view">
+    <div class="review-head">
+      <h2>Review clips</h2>
+      <div id="stats" class="stats"></div>
+    </div>
+    <div id="warnings"></div>
+    <div class="toolbar">
+      <div id="speaker-filter" class="chips"></div>
+      <div class="spacer"></div>
+      <label class="check"><input type="checkbox" id="only-included"> included only</label>
+      <button data-bulk="include_all" class="link">include all</button>
+      <button data-bulk="exclude_all" class="link">exclude all</button>
+      <button data-bulk="exclude_short" class="link">drop very short</button>
+    </div>
+    <p class="hint kbd">
+      <b>J</b>/<b>K</b> move · <b>Space</b> play · <b>E</b> include/exclude ·
+      <b>Enter</b> edit text · <b>Esc</b> stop editing
+    </p>
+    <div id="clips" class="clips"></div>
+    <div class="sticky-actions">
+      <button id="to-train" class="primary">Looks good — set up training →</button>
+    </div>
+  </section>
+
+  <!-- 4. Train -->
+  <section id="view-train" class="view">
+    <h2>Training</h2>
+    <div class="panel">
+      <div class="row">
+        <label>Batch size <input type="number" id="batch" min="1" max="64" value="8"></label>
+        <label class="check"><input type="checkbox" id="scratch"> train from scratch</label>
+      </div>
+      <p class="hint">Bigger batches train faster until VRAM runs out. Leave
+        "from scratch" off — fine-tuning a pretrained checkpoint is far quicker.</p>
+      <button id="start-train" class="primary">Start training</button>
+      <button id="stop-train" class="danger" hidden>Stop training</button>
+    </div>
+    <div id="train-progress" class="progress-wrap" hidden>
+      <div class="progress-text"></div>
+      <pre class="log"></pre>
+    </div>
+    <div class="panel">
+      <h3>Listen to a checkpoint</h3>
+      <p class="hint">This is how you decide it is done — the loss curve is a
+        hint, your ears are the judge.</p>
+      <div class="row">
+        <label class="grow">Say <input id="sample-text" value="The quick brown fox jumps over the lazy dog."></label>
+        <button id="refresh-ckpts" class="link">refresh</button>
+      </div>
+      <div id="checkpoints" class="cards"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -10,6 +10,12 @@
 > tooling in one container — published to GHCR and installable from a template
 > like any other Unraid app. No local build, no host packages.
 >
+> It also adds a **web UI**: drop in one long recording, and it is split into
+> clips, transcribed, and grouped by speaker. You correct the transcripts and
+> exclude the clips you do not want (on a podcast, keeping only your target
+> speaker is one click), press train, and listen to the voice at each checkpoint
+> as it improves.
+>
 > **[→ Unraid install guide](unraid/README-unraid.md)**
 >
 > ```

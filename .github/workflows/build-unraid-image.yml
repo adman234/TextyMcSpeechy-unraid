@@ -27,6 +27,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test the docker shim
         run: bash unraid/tests/test-docker-shim.sh
+      - name: Test clip grouping
+        # Pure logic, no ML deps: grouping decides what the model trains on, and
+        # a regression here degrades the voice silently rather than erroring.
+        run: python3 unraid/webui/tests/test_grouping.py
+      - name: Byte-compile the web backend
+        run: python3 -m compileall -q unraid/webui/tms_web
       - name: Shellcheck the Unraid scripts
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
@@ -133,6 +139,19 @@ jobs:
           # Deep scripts must be executable, not just the top-level ones.
           docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
             bash -c 'test -x /app/tts_dojo/DOJO_CONTENTS/scripts/utils/piper_training.sh && echo "deep scripts executable OK"'
+
+          # The web UI must actually serve. Runs without a GPU, so /api/health
+          # reports no GPU -- that it answers at all is the point.
+          docker run -d --name tms-web -v tms-smoke:/app/tts_dojo -p 18080:8080 "$IMAGE"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:18080/api/health | tee /dev/stderr | grep -q free_gb
+          curl -fsS http://127.0.0.1:18080/ | grep -q TextyMcSpeechy
+          curl -fsS http://127.0.0.1:18080/api/projects >/dev/null
+          echo "web UI OK"
+          docker rm -f tms-web >/dev/null
           # Second start must leave the user's data alone.
           docker run --rm -v tms-smoke:/app/tts_dojo "$IMAGE" \
             bash -c 'touch /app/tts_dojo/.mine'

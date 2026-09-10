@@ -2,9 +2,12 @@
 
 <img src="textymcspeechy.png" width="96" alt="">
 
-Train a Piper TTS voice on your Unraid server's NVIDIA GPU. Pull the image, apply
-the template, open the console. No local build, no host packages, no scripts to
-install.
+Train a Piper TTS voice on your Unraid server's NVIDIA GPU, from a browser.
+
+Drop in a long recording. It gets split into clips, transcribed, and grouped by
+speaker. You correct the transcripts and drop the clips you do not want, press
+train, and listen to the voice as it improves. No local build, no host packages,
+no scripts to install.
 
 ```
 https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/textymcspeechy-unraid.xml
@@ -20,14 +23,66 @@ https://raw.githubusercontent.com/adman234/TextyMcSpeechy-unraid/main/unraid/tex
    **Template** at the top.
 3. Check the **Appdata** path points at an NVMe pool (see [Storage](#storage)),
    then **Apply**. The image is ~15 GB, so the first pull takes a while.
-4. Click the container icon → **Console**, and run `tms doctor`.
+4. Click **WebUI** (port 8080). The header shows whether the GPU is working.
+5. Pretrained checkpoints are a separate ~5 GB download. From the container
+   console, run `tms checkpoints en-us` once.
 
 That's it. There is no step where you build anything.
 
-## Using it
+## Using it: the web UI
 
-The container has no web UI of its own — it's a workbench you open a terminal
-into. Everything is reachable through one command:
+Click **WebUI** on the container (port 8080). The whole workflow lives there.
+
+**1 · Import.** Drop in one long recording — an interview, a podcast episode,
+two hours is fine. Press *Split & transcribe*. It decodes the audio, transcribes
+it with word-level timestamps, cuts it into utterance-length clips at natural
+pauses, and groups the clips by who is speaking.
+
+**2 · Review.** This is where the quality comes from, so it is built to be fast:
+
+| Key | Does |
+|---|---|
+| `J` / `K` | move down / up |
+| `Space` | play the current clip |
+| `E` | include / exclude |
+| `Enter` | edit the transcript, `Esc` to stop |
+
+On a podcast, the speaker chips at the top let you keep only your target speaker
+in one click instead of excluding hundreds of clips by hand. The header tracks
+**included minutes** as you go — that is the number that matters, and the UI
+warns you below about ten.
+
+Transcripts must match what was actually *said*. Whisper gets most of it, but
+numbers, names and filler words need your eyes. This is the single biggest
+factor in how good the finished voice sounds.
+
+**3 · Train.** Press *Start training*. Live log and epoch counter in the browser,
+loss curves on port 6006. Training survives closing the tab.
+
+**4 · Listen.** Once checkpoints appear, type a sentence and hear the voice at
+each one. That is how you decide it is done — the loss curve is a hint, your
+ears are the judge. Finished voices land in
+`<voice>_dojo/tts_voices/` in your appdata.
+
+### Speaker grouping
+
+Clips are grouped by clustering voice embeddings, deliberately not with
+pyannote: its diarization models sit behind a Hugging Face licence acceptance,
+which would turn "install the container" into "go make an account". The
+trade-off is less precision on overlapping speech. If the embedding model is
+unavailable for any reason the import still succeeds with every clip in one
+group — you just exclude by hand.
+
+### Model downloads
+
+Speech recognition models (~3 GB) download on first import, and pretrained Piper
+checkpoints (~5 GB) come from `tms checkpoints en-us`. Both land in **appdata,
+not the image**, so they survive updates and are not part of the pull.
+
+## Using it: the terminal
+
+Everything above is also available from the container console, which is what the
+web UI drives underneath:
 
 ```
 tms doctor              Check the GPU, driver and PyTorch build. Run this first.
