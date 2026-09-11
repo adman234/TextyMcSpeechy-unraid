@@ -396,6 +396,7 @@ async function loadCheckpoints() {
         <b>epoch ${c.epoch}</b>
         <span class="meta">${esc(c.name)} · ${c.size_mb} MB</span>
         <button class="primary" data-sample="${esc(c.path)}">Speak this</button>
+        <button class="link" data-export="${esc(c.path)}">export as voice</button>
         <audio controls hidden></audio>
       </div>`).join("")
     : `<p class="hint">No checkpoints yet. They appear a few epochs into training.</p>`;
@@ -431,6 +432,25 @@ function wireTrain() {
   $("#restart").onchange = loadCheckpoints;
 
   $("#checkpoints").addEventListener("click", async e => {
+    const exp = e.target.closest("[data-export]");
+    if (exp) {
+      exp.disabled = true;
+      exp.textContent = "exporting…";
+      try {
+        const r = await api(`/api/projects/${state.project.name}/export`, {
+          method: "POST", body: JSON.stringify({ checkpoint: exp.dataset.export }),
+        });
+        toast(`Exported ${r.name} (${r.size_mb} MB) — epoch ${r.epoch}`);
+        const card = exp.closest(".card");
+        const out = document.createElement("p");
+        out.className = "meta";
+        out.innerHTML = `Saved to <code>${esc(r.dir)}</code>`;
+        card.appendChild(out);
+      } catch (x) { toast(x.message, true); }
+      exp.disabled = false;
+      exp.textContent = "export as voice";
+      return;
+    }
     const btn = e.target.closest("[data-sample]");
     if (!btn) return;
     btn.disabled = true;

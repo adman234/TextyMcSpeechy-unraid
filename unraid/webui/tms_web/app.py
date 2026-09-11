@@ -273,6 +273,19 @@ def api_sample(name: str, body: Sample):
     return {"url": f"/api/projects/{name}/sample/{out.name}"}
 
 
+class Export(BaseModel):
+    checkpoint: str
+
+
+@app.post("/api/projects/{name}/export")
+def api_export(name: str, body: Export):
+    project = _project_or_404(name)
+    try:
+        return dojo.export_voice(project, body.checkpoint)
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/projects/{name}/sample/{filename}")
 def api_sample_audio(name: str, filename: str):
     path = projects.project_path(name) / "samples" / Path(filename).name

@@ -295,6 +295,65 @@ def list_checkpoints(voice: str) -> list[dict]:
     return found
 
 
+QUALITY_LABEL = {"x-low": "x_low", "medium": "medium", "high": "high"}
+
+
+def _checkpoint_to_onnx(dojo: Path, ckpt: Path, onnx: Path) -> None:
+    onnx.parent.mkdir(parents=True, exist_ok=True)
+    sh(["python3", str(dojo / "scripts" / "utils" / "export_onnx.py"),
+        "--checkpoint", str(ckpt), "--output-file", str(onnx)],
+       cwd="/app/piper")
+
+
+def export_voice(project: dict, checkpoint: str) -> dict:
+    """Produce a finished Piper voice: correctly named, correctly configured.
+
+    Two things separate this from the sample renderer. The filename must follow
+    Piper's <lang>_<REGION>-<name>-<quality> convention, which is how Home
+    Assistant and other clients identify a voice. And the .onnx.json that
+    training emits is a *training* config -- three fields have to be rewritten
+    for it to work as a voice config, exactly as the dojo's own exporter does.
+    """
+    voice = project["voice_name"]
+    quality = project.get("quality", "medium")
+    dojo = dojo_dir(voice)
+    ckpt = Path(checkpoint)
+    if not ckpt.is_file():
+        raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+
+    prefix = project.get("piper_prefix", "en_US")
+    name = f"{prefix}-{voice}-{QUALITY_LABEL.get(quality, quality)}"
+    out_dir = dojo / "tts_voices" / name
+    onnx = out_dir / f"{name}.onnx"
+
+    _checkpoint_to_onnx(dojo, ckpt, onnx)
+
+    cfg_src = dojo / "training_folder" / "config.json"
+    if not cfg_src.is_file():
+        raise RuntimeError(
+            f"{cfg_src} is missing -- it is written during training, so train "
+            "at least one epoch before exporting.")
+    config_json = json.loads(cfg_src.read_text(encoding="utf-8"))
+
+    # The three fields the dojo's own exporter rewrites. Without them the voice
+    # loads but clients mislabel it, and Home Assistant may not list it at all.
+    config_json.setdefault("audio", {})["quality"] = quality
+    config_json.setdefault("language", {})["code"] = project.get("espeak_language", "en-us")
+    config_json["dataset"] = name
+
+    onnx.with_suffix(".onnx.json").write_text(
+        json.dumps(config_json, indent=2), encoding="utf-8")
+
+    return {
+        "name": name,
+        "dir": str(out_dir),
+        "onnx": str(onnx),
+        "config": str(onnx.with_suffix(".onnx.json")),
+        "epoch": _epoch_of(ckpt),
+        "size_mb": round(onnx.stat().st_size / 1e6, 1),
+    }
+
+
 def sample_voice(voice: str, checkpoint: str, text: str, out_wav: Path) -> Path:
     """Export a checkpoint to onnx (cached) and speak `text` with it.
 
@@ -311,9 +370,7 @@ def sample_voice(voice: str, checkpoint: str, text: str, out_wav: Path) -> Path:
     onnx = onnx_dir / f"{ckpt.stem}.onnx"
 
     if not onnx.exists():
-        sh(["python3", str(dojo / "scripts" / "utils" / "export_onnx.py"),
-            "--checkpoint", str(ckpt), "--output-file", str(onnx)],
-           cwd="/app/piper")
+        _checkpoint_to_onnx(dojo, ckpt, onnx)
         cfg = dojo / "training_folder" / "config.json"
         if cfg.exists():
             shutil.copy(cfg, onnx.with_suffix(".onnx.json"))

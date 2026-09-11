@@ -242,6 +242,68 @@ def test_resume_checkpoint_is_found_in_voice_checkpoints_too(tmp):
     assert found is not None and "epoch=7" in found.name
 
 
+@with_temp_dojo
+def test_export_names_and_configures_the_voice(tmp):
+    """Piper identifies a voice by filename convention, and the training
+    config is not a voice config until three fields are rewritten."""
+    import json as _json
+    project = {"voice_name": "joey", "dataset_name": "joey", "quality": "medium",
+               "voice_type": "M", "piper_prefix": "en_AU", "espeak_language": "en",
+               "batch_size": 8, "num_workers": 8, "from_scratch": False}
+    d = dojo.prepare_dojo(project, FakeJob())
+    (d / "training_folder").mkdir(exist_ok=True)
+    (d / "training_folder" / "config.json").write_text(_json.dumps(
+        {"audio": {"sample_rate": 22050}, "espeak": {"voice": "en"},
+         "num_symbols": 256}))
+    ckpt = _ckpt(d / "voice_checkpoints", "epoch=900-val_mel=0.31.ckpt")
+
+    calls = []
+    original = dojo._checkpoint_to_onnx
+
+    def fake(dojo_path, src, onnx):
+        calls.append((src, onnx))
+        onnx.parent.mkdir(parents=True, exist_ok=True)
+        onnx.write_bytes(b"onnx-bytes")
+
+    try:
+        dojo._checkpoint_to_onnx = fake
+        result = dojo.export_voice(project, str(ckpt))
+    finally:
+        dojo._checkpoint_to_onnx = original
+
+    assert result["name"] == "en_AU-joey-medium", result["name"]
+    assert result["epoch"] == 900
+    onnx = Path(result["onnx"])
+    assert onnx.name == "en_AU-joey-medium.onnx"
+    assert onnx.parent.name == "en_AU-joey-medium", "voice needs its own folder"
+
+    cfg = _json.loads(Path(result["config"]).read_text())
+    assert cfg["audio"]["quality"] == "medium", "clients read quality from here"
+    assert cfg["language"]["code"] == "en"
+    assert cfg["dataset"] == "en_AU-joey-medium"
+    assert cfg["audio"]["sample_rate"] == 22050, "existing fields must survive"
+    assert cfg["espeak"]["voice"] == "en", "phonemizer config must survive"
+
+
+@with_temp_dojo
+def test_export_without_training_config_says_why(tmp):
+    project = {"voice_name": "joey", "dataset_name": "joey", "quality": "medium",
+               "voice_type": "M", "batch_size": 8, "num_workers": 8,
+               "from_scratch": False}
+    d = dojo.prepare_dojo(project, FakeJob())
+    ckpt = _ckpt(d / "voice_checkpoints", "epoch=1-val_mel=0.9.ckpt")
+    original = dojo._checkpoint_to_onnx
+    try:
+        dojo._checkpoint_to_onnx = lambda a, b, c: c.parent.mkdir(parents=True, exist_ok=True) or c.write_bytes(b"x")
+        dojo.export_voice(project, str(ckpt))
+    except RuntimeError as exc:
+        assert "config.json" in str(exc) and "train" in str(exc), exc
+    else:
+        raise AssertionError("must explain the missing training config")
+    finally:
+        dojo._checkpoint_to_onnx = original
+
+
 def run() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
