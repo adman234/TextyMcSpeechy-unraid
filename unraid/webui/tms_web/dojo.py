@@ -335,10 +335,25 @@ def export_voice(project: dict, checkpoint: str) -> dict:
             "at least one epoch before exporting.")
     config_json = json.loads(cfg_src.read_text(encoding="utf-8"))
 
-    # The three fields the dojo's own exporter rewrites. Without them the voice
-    # loads but clients mislabel it, and Home Assistant may not list it at all.
-    config_json.setdefault("audio", {})["quality"] = quality
-    config_json.setdefault("language", {})["code"] = project.get("espeak_language", "en-us")
+    # The fields the dojo's own exporter rewrites. Without them the voice loads
+    # but clients mislabel it, and Home Assistant may not list it at all.
+    #
+    # language.code is the BCP 47 code from the FILENAME (en_GB), and is NOT the
+    # espeak identifier (en) even though they often look alike -- they come from
+    # different lists. Getting this wrong is not an error: Home Assistant simply
+    # files the voice under bare "English" instead of a specific locale, and you
+    # are left hunting for why it will not appear under en_GB.
+    #
+    # espeak.voice is deliberately left as training wrote it: that one IS the
+    # espeak identifier, and it decides pronunciation.
+    quality_label = QUALITY_LABEL.get(quality, quality)
+    config_json.setdefault("audio", {})["quality"] = quality_label
+    family, _, region = prefix.partition("_")
+    language = config_json.setdefault("language", {})
+    language["code"] = prefix
+    language["family"] = family
+    if region:
+        language["region"] = region
     config_json["dataset"] = name
 
     onnx.with_suffix(".onnx.json").write_text(

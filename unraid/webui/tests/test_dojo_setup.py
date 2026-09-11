@@ -279,10 +279,46 @@ def test_export_names_and_configures_the_voice(tmp):
 
     cfg = _json.loads(Path(result["config"]).read_text())
     assert cfg["audio"]["quality"] == "medium", "clients read quality from here"
-    assert cfg["language"]["code"] == "en"
     assert cfg["dataset"] == "en_AU-joey-medium"
     assert cfg["audio"]["sample_rate"] == 22050, "existing fields must survive"
+
+    # language.code is the BCP 47 code from the filename, NOT the espeak
+    # identifier. Setting it to the espeak code makes Home Assistant file the
+    # voice under bare "English" rather than the locale.
+    assert cfg["language"]["code"] == "en_AU", \
+        f"language.code must match the filename prefix, got {cfg['language']['code']}"
+    assert cfg["language"]["family"] == "en"
+    assert cfg["language"]["region"] == "AU"
+
+    # espeak.voice is the espeak identifier and drives pronunciation: it must
+    # keep the value training wrote, not be overwritten with the locale.
     assert cfg["espeak"]["voice"] == "en", "phonemizer config must survive"
+
+
+@with_temp_dojo
+def test_export_quality_label_matches_the_filename(tmp):
+    """audio.quality must use the same spelling as the filename: x_low, not x-low."""
+    import json as _json
+    project = {"voice_name": "joey", "dataset_name": "joey", "quality": "x-low",
+               "voice_type": "M", "piper_prefix": "en_GB", "espeak_language": "en",
+               "batch_size": 8, "num_workers": 8, "from_scratch": False}
+    d = dojo.prepare_dojo(project, FakeJob())
+    (d / "training_folder").mkdir(exist_ok=True)
+    (d / "training_folder" / "config.json").write_text(_json.dumps({"audio": {}}))
+    ckpt = _ckpt(d / "voice_checkpoints", "epoch=5-val_mel=0.4.ckpt")
+
+    original = dojo._checkpoint_to_onnx
+    try:
+        dojo._checkpoint_to_onnx = lambda a, b, c: (
+            c.parent.mkdir(parents=True, exist_ok=True), c.write_bytes(b"x"))
+        result = dojo.export_voice(project, str(ckpt))
+    finally:
+        dojo._checkpoint_to_onnx = original
+
+    assert result["name"] == "en_GB-joey-x_low", result["name"]
+    cfg = _json.loads(Path(result["config"]).read_text())
+    assert cfg["audio"]["quality"] == "x_low", \
+        f"quality must match the filename spelling, got {cfg['audio']['quality']}"
 
 
 @with_temp_dojo
